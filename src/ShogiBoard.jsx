@@ -170,7 +170,7 @@ const SIDEBAR_INNER = SIDEBAR_W - 24; // padding 12×2 を除いた内寸
 
 export default function ShogiBoard({
   moveHistory, onMove, boardKey, nav, onEval, blunder,
-  wide = false, graphSlot = null,
+  wide = false, graphSlot = null, mobile = false,
 }) {
   const shogiRef = useRef(null);
   const [, setTick] = useState(0);
@@ -368,8 +368,36 @@ export default function ShogiBoard({
     return () => ro.disconnect();
   }, [wide]);
 
-  // 評価値バー（手番表示を含む）と候補手パネル：ワイド時はサイドバー幅に合わせる
-  const panelW = wide ? SIDEBAR_INNER : CELL * 9;
+  // ---- モバイル（768px未満）：盤面ブロックを画面幅に収まるよう縮小 ----
+  // ワイドモードと同じ transform: scale 方式（クリック座標はブラウザが変換ごと扱う）。
+  const mobileCoreRef = useRef(null);
+  const [mobileScale, setMobileScale] = useState(1);
+  const [mobileBase, setMobileBase] = useState(null);
+  useEffect(() => {
+    if (!mobile) { setMobileScale(1); setMobileBase(null); return; }
+    const compute = () => {
+      const el = mobileCoreRef.current;
+      if (!el) return;
+      const w = el.offsetWidth;   // transform の影響を受けない実寸
+      const h = el.offsetHeight;
+      if (w <= 0) return;
+      const avail = window.innerWidth - 24; // 左右 padding ぶん
+      // 画面幅いっぱいまで拡大（上限はワイドモードと同じ盤の一辺 900px）
+      setMobileScale(Math.min(avail / w, 900 / (CELL * 9)));
+      setMobileBase({ w, h });
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [mobile]);
+
+  // 評価値バー（手番表示を含む）と候補手パネル：
+  // ワイド時はサイドバー幅、モバイル時は画面幅内に収める
+  const panelW = wide
+    ? SIDEBAR_INNER
+    : mobile
+    ? `min(${CELL * 9}px, calc(100vw - 24px))`
+    : CELL * 9;
   const evalBarEl = <EvalBar evalInfo={evalInfo} turn={shogi.turn} width={panelW} />;
   const candidateEl = (
     <CandidatePanel
@@ -391,23 +419,39 @@ export default function ShogiBoard({
   // 無操作時は最善手プレビューの駒打ちを表示（経路(2)への追加）
   const standDropKind = hoverMove ? hoverDropKind : bestDropKind;
 
-  // 左持ち駒（奥=相手側）＋盤面＋右持ち駒（手前=自分側）
-  const boardRow = (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+  // 相手側（奥）＝handLeft、自分側（手前）＝handRight（反転時は定義側で入れ替わる）
+  const handOppEl = (
+    <HandArea
+      label={handLeft.label}
+      hands={handLeft.hands}
+      color={handLeft.color}
+      flipped={flipped}
+      selected={selected}
+      onHandClick={handleHandClick}
+      hoverKind={handLeft.color === shogi.turn ? standDropKind : null}
+      horizontal={mobile}
+    />
+  );
+  const handMineEl = (
+    <HandArea
+      label={handRight.label}
+      hands={handRight.hands}
+      color={handRight.color}
+      flipped={flipped}
+      selected={selected}
+      onHandClick={handleHandClick}
+      hoverKind={handRight.color === shogi.turn ? standDropKind : null}
+      horizontal={mobile}
+    />
+  );
 
-      <HandArea
-        label={handLeft.label}
-        hands={handLeft.hands}
-        color={handLeft.color}
-        flipped={flipped}
-        selected={selected}
-        onHandClick={handleHandClick}
-        hoverKind={handLeft.color === shogi.turn ? standDropKind : null}
-      />
+  // 段・筋ラベルの幅：モバイルでは余白を詰めて盤を大きくする（768px以上は従来どおり）
+  const rowLabelW = mobile ? 16 : CELL;
 
-      {/* 盤面 */}
+  // 盤面本体（ラベル＋グリッド）
+  const boardCore = (
       <div>
-        <div style={{ display: 'flex', marginLeft: CELL }}>
+        <div style={{ display: 'flex', marginLeft: rowLabelW }}>
           {colLabels.map(c => (
             <div key={c} style={{
               width: CELL, textAlign: 'center', fontSize: 11, color: '#8b5e3c',
@@ -420,7 +464,7 @@ export default function ShogiBoard({
           <div>
             {rowLabels.map((r, i) => (
               <div key={i} style={{
-                width: CELL, height: CELL,
+                width: rowLabelW, height: CELL,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 11, color: '#8b5e3c', fontFamily: 'serif',
               }}>{r}</div>
@@ -542,17 +586,22 @@ export default function ShogiBoard({
           </div>
         </div>
       </div>
+  );
 
-      <HandArea
-        label={handRight.label}
-        hands={handRight.hands}
-        color={handRight.color}
-        flipped={flipped}
-        selected={selected}
-        onHandClick={handleHandClick}
-        hoverKind={handRight.color === shogi.turn ? standDropKind : null}
-      />
-
+  // モバイル：持ち駒を盤の上下に配置（上=相手側・下=手前側。反転時は handLeft/handRight の
+  // 定義側で色が入れ替わるため「手前側が常に下」が保たれる）。
+  // デスクトップ：従来どおり左右配置。
+  const boardRow = mobile ? (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+        {handOppEl}
+        {boardCore}
+        {handMineEl}
+      </div>
+  ) : (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+        {handOppEl}
+        {boardCore}
+        {handMineEl}
       </div>
   );
 
@@ -669,7 +718,22 @@ export default function ShogiBoard({
       }}>
         {evalBarEl}
         {candidateEl}
-        {boardRow}
+        {mobile ? (
+          /* 縮小後の実寸を確保するラッパー（transformはレイアウト寸法を変えないため） */
+          <div style={{
+            width: mobileBase ? mobileBase.w * mobileScale : undefined,
+            height: mobileBase ? mobileBase.h * mobileScale : undefined,
+          }}>
+            <div
+              ref={mobileCoreRef}
+              style={{ transform: `scale(${mobileScale})`, transformOrigin: 'top left', width: 'fit-content' }}
+            >
+              {boardRow}
+            </div>
+          </div>
+        ) : (
+          boardRow
+        )}
         {navEl}
       </div>
       {promDialog}
@@ -1041,28 +1105,16 @@ function NavBtn({ label, title, onClick, disabled, small, active }) {
 }
 
 // ---- 持ち駒エリア ----
-// 縦長の駒台（盤の左右に配置）。hoverKind = 候補手（駒打ち）ホバー中の駒種
-function HandArea({ label, hands, color, flipped, selected, onHandClick, hoverKind = null }) {
+// 駒台。既定は縦長（盤の左右に配置）、horizontal=true で横長（モバイル・盤の上下に配置）。
+// hoverKind = 候補手（駒打ち）ホバー/最善手プレビュー中の駒種
+function HandArea({ label, hands, color, flipped, selected, onHandClick, hoverKind = null, horizontal = false }) {
   const hasAny = HAND_KINDS.some(k => (hands[k] ?? 0) > 0);
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      // 盤の筋ラベル行（CELL*0.4）ぶん下げて盤面と上端を揃える
-      marginTop: CELL * 0.4,
-    }}>
-      <div style={{ fontSize: 10, color: '#8b5e3c', marginBottom: 3, fontFamily: 'serif', whiteSpace: 'nowrap' }}>
-        {label}
-      </div>
-      <div style={{
-        width: 52, height: CELL * 9 - 16, boxSizing: 'border-box',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-        padding: '8px 2px',
-        background: '#f0e6d0', borderRadius: 4, border: '1px solid #c8a96e',
-      }}>
+  const cells = (
+    <>
         {!hasAny && (
           <span style={{
             fontSize: 10, color: '#bbb', fontFamily: 'serif',
-            writingMode: 'vertical-rl', marginTop: 6,
+            ...(horizontal ? {} : { writingMode: 'vertical-rl', marginTop: 6 }),
           }}>
             なし
           </span>
@@ -1100,6 +1152,45 @@ function HandArea({ label, hands, color, flipped, selected, onHandClick, hoverKi
             </div>
           );
         })}
+    </>
+  );
+
+  if (horizontal) {
+    // 横長（モバイル・盤の上下配置）
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', boxSizing: 'border-box' }}>
+        <span style={{ fontSize: 10, color: '#8b5e3c', fontFamily: 'serif', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+        <div style={{
+          flex: 1, minHeight: 46, boxSizing: 'border-box',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+          padding: '3px 6px', flexWrap: 'wrap',
+          background: '#f0e6d0', borderRadius: 4, border: '1px solid #c8a96e',
+        }}>
+          {cells}
+        </div>
+      </div>
+    );
+  }
+
+  // 縦長（デスクトップ・盤の左右配置）
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      // 盤の筋ラベル行（CELL*0.4）ぶん下げて盤面と上端を揃える
+      marginTop: CELL * 0.4,
+    }}>
+      <div style={{ fontSize: 10, color: '#8b5e3c', marginBottom: 3, fontFamily: 'serif', whiteSpace: 'nowrap' }}>
+        {label}
+      </div>
+      <div style={{
+        width: 52, height: CELL * 9 - 16, boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+        padding: '8px 2px',
+        background: '#f0e6d0', borderRadius: 4, border: '1px solid #c8a96e',
+      }}>
+        {cells}
       </div>
     </div>
   );

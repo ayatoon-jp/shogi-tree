@@ -529,6 +529,11 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   const wideBoard = !showTree && vw >= 1200;
+  // スマートフォン向け1カラム表示（768px未満）。既存の vw 監視を踏襲した表示分岐のみ。
+  const mobileView = vw < 768;
+  // モバイル用：ヘッダーのボタン群を格納するプルダウン
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const jsonInputRef = useRef(null); // メニューから JSON インポートを起動するための常設 input
 
   // ---- 分岐比較（2ノードを選んで評価値推移を重ね描き）----
   const [compareA, setCompareA] = useState(null); // 変化A の nodeId
@@ -852,12 +857,13 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100dvh' }}>
-      {/* ヘッダツールバー */}
+      {/* ヘッダツールバー（モバイルでは折り返して縦潰れを防ぐ） */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '6px 16px', background: '#3a1a00', color: '#f5e6c8',
         fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif',
         borderBottom: '2px solid #8b5e3c', flexShrink: 0,
+        ...(mobileView ? { flexWrap: 'wrap', rowGap: 4 } : {}),
       }}>
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
           <span style={{ fontSize: 15, fontWeight: 'bold', letterSpacing: 2 }}>
@@ -871,7 +877,16 @@ export default function App() {
               : ''}
           </span>
         </span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'center', position: 'relative',
+          ...(mobileView ? { flexWrap: 'wrap', rowGap: 6 } : {}),
+        }}>
+          {/* ファイル入力はデスクトップのラベル・モバイルのメニュー双方から使うため常設 */}
+          <input ref={kifInputRef} type="file" accept=".kif,.kifu,.txt" onChange={importKIF} style={{ display: 'none' }} />
+          <input ref={jsonInputRef} type="file" accept=".json" onChange={importJSON} style={{ display: 'none' }} />
+
+          {/* ツリーON/OFF・比較は768px未満では機能しないため非表示（プルダウンにも入れない） */}
+          {!mobileView && (
           <button
             onClick={() => setShowTree(v => !v)}
             style={{ ...toolbarBtn, background: showTree ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)' }}
@@ -879,6 +894,7 @@ export default function App() {
           >
             🌳 ツリー {showTree ? 'ON' : 'OFF'}
           </button>
+          )}
           <button
             onClick={() => setShowGraph(v => !v)}
             style={{ ...toolbarBtn, background: showGraph ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)' }}
@@ -886,6 +902,7 @@ export default function App() {
           >
             📈 グラフ {showGraph ? 'ON' : 'OFF'}
           </button>
+          {!mobileView && (<>
           <button
             onClick={pickCompare}
             style={{ ...toolbarBtn, background: (showCompare || compareA != null) ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)' }}
@@ -901,7 +918,7 @@ export default function App() {
           </button>
           <label style={{ ...toolbarBtn, cursor: 'pointer' }}>
             KIF読み込み
-            <input ref={kifInputRef} type="file" accept=".kif,.kifu,.txt" onChange={importKIF} style={{ display: 'none' }} />
+            <input type="file" accept=".kif,.kifu,.txt" onChange={importKIF} style={{ display: 'none' }} />
           </label>
           <button
             onClick={() => { setPasteError(null); setShowPasteKif(true); }}
@@ -1079,6 +1096,83 @@ export default function App() {
             JSONインポート
             <input type="file" accept=".json" onChange={importJSON} style={{ display: 'none' }} />
           </label>
+          </>)}
+
+          {/* モバイル：機能ボタンをプルダウンに集約 */}
+          {mobileView && (
+            <span style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowMobileMenu(v => !v)}
+                style={{ ...toolbarBtn, background: showMobileMenu ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.12)' }}
+              >
+                ☰ メニュー
+              </button>
+              {showMobileMenu && (
+                <>
+                  <div
+                    onClick={() => setShowMobileMenu(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                  />
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 41,
+                    minWidth: 230, maxHeight: '70vh', overflowY: 'auto',
+                    background: '#fdf6e3', border: '1.5px solid #8b5e3c', borderRadius: 8,
+                    boxShadow: '0 6px 20px rgba(0,0,0,0.25)', color: '#3a1a00',
+                  }}>
+                    {[
+                      ['KIF読み込み', () => kifInputRef.current?.click()],
+                      ['KIF貼り付け', () => { setPasteError(null); setShowPasteKif(true); }],
+                      ['棋譜解析', () => startBatch(nodes), !!batch],
+                      ['⊟ すべて展開', expandAllAuto],
+                      ['⊞ 折りたたむ', collapseSelectedNow],
+                      ['💡 最善手ブランチ', addBestBranchesNow],
+                      ['JSONエクスポート', exportJSON],
+                      ['JSONインポート', () => jsonInputRef.current?.click()],
+                    ].map(([label, fn, disabled]) => (
+                      <button
+                        key={label}
+                        disabled={!!disabled}
+                        onClick={() => { setShowMobileMenu(false); fn(); }}
+                        style={{
+                          display: 'block', width: '100%', padding: '11px 14px',
+                          border: 'none', cursor: disabled ? 'default' : 'pointer',
+                          background: 'transparent', textAlign: 'left',
+                          borderBottom: '1px solid #e8d5a3', fontSize: 13,
+                          color: disabled ? '#b7a888' : '#3a1a00',
+                          fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <div style={{
+                      padding: '7px 12px', fontSize: 11, color: '#8b5e3c',
+                      borderBottom: '1px solid #e8d5a3', background: '#f5e6c8',
+                    }}>
+                      解析の深さ（1局面あたり）
+                    </div>
+                    {DEPTH_OPTIONS.map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => { setAnalysisDepth(opt.key); setShowMobileMenu(false); }}
+                        style={{
+                          display: 'block', width: '100%', padding: '9px 14px',
+                          border: 'none', cursor: 'pointer', textAlign: 'left',
+                          borderBottom: '1px solid #e8d5a3',
+                          background: analysisDepth === opt.key ? '#f0e6d0' : 'transparent',
+                          fontSize: 13, color: '#3a1a00',
+                          fontFamily: '"Hiragino Mincho ProN", "Yu Mincho", serif',
+                        }}
+                      >
+                        {analysisDepth === opt.key ? '● ' : '○ '}{opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </span>
+          )}
+
           <button
             onClick={() => setShowHelp(v => !v)}
             style={{
@@ -1095,10 +1189,10 @@ export default function App() {
 
       {/* メインエリア：将棋盤（左）＋ ツリー（右） */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* 将棋盤（＋評価値グラフ）。ツリー非表示時は全幅に広がる */}
+        {/* 将棋盤（＋評価値グラフ）。ツリー非表示時・モバイルでは全幅に広がる */}
         <div style={{
-          width: showTree ? '50%' : '100%',
-          borderRight: showTree ? '2px solid #8b5e3c' : 'none',
+          width: showTree && !mobileView ? '50%' : '100%',
+          borderRight: showTree && !mobileView ? '2px solid #8b5e3c' : 'none',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -1110,6 +1204,7 @@ export default function App() {
               onEval={handleEval}
               blunder={boardBlunder}
               wide={wideBoard}
+              mobile={mobileView}
               graphSlot={wideBoard && (showGraph || (showCompare && compareData)) ? (
                 showCompare && compareData ? (
                   <CompareView
@@ -1156,8 +1251,9 @@ export default function App() {
           )}
         </div>
 
-        {/* 分岐ツリー（トグルで非表示可。データは App が保持し続ける） */}
-        {showTree && (
+        {/* 分岐ツリー（トグルで非表示可。データは App が保持し続ける）。
+            モバイルでは非表示（ミニマップ・整列・ズームコントロールも一緒に消える） */}
+        {showTree && !mobileView && (
           <div style={{ width: '50%', overflow: 'hidden' }}>
             <ShogiTree
               nodes={nodes}
